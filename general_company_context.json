@@ -1,0 +1,33 @@
+{
+  "company_info": {
+    "name": "[Company Name]",
+    "sector": "Infrastructure, Transportation, Construction, and Energy",
+    "core_business": "Global investor and operator of transport infrastructure (highways and airports). Key divisions include Highways, Airports, Construction, and Energy.",
+    "target_markets": ["United States", "Canada", "United Kingdom", "Spain", "Poland", "India"],
+    "key_competitors": ["ACS Group (ACS)", "Acciona", "Sacyr", "Skanska", "Vinci", "Bouygues", "Eiffage", "Hochtief"]
+  },
+  "strategic_interests": {
+    "priority_topics": [
+      "North American expansion (Express Lanes/Managed Lanes)",
+      "New Terminal One project at JFK International Airport",
+      "Listing and visibility on NASDAQ (NASDAQ-100 Index)",
+      "Energy Transition and Renewable Energy Infrastructure",
+      "Digital Infrastructure and Data Centers",
+      "2030 Sustainability Strategy (CO2 reduction, Water management)"
+    ],
+    "pain_points": [
+      "Regulatory changes in the U.S. and Canadian markets",
+      "Interest rate fluctuations affecting long-term project financing",
+      "Rising construction and material costs",
+      "Geopolitical risks in emerging markets"
+    ],
+    "terminology": [
+      "Concession model",
+      "Managed Lanes",
+      "P3 (Public-Private Partnerships)",
+      "Equity value rebalancing",
+      "Asset rotation",
+      "Net Zero / ESG"
+    ]
+  }
+}

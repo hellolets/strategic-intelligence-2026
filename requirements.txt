@@ -1,0 +1,37 @@
+# Core Dependencies
+python-dotenv
+
+# LangChain Stack
+langchain-core
+langchain-openai
+langchain-google-genai
+
+# Search APIs
+tavily-python
+exa-py
+
+# Workflow
+langgraph
+langchain
+
+# Database
+pyairtable
+
+# Utilities
+pydantic
+rich
+python-docx
+boto3
+aiohttp
+requests
+matplotlib
+seaborn
+pandas
+numpy
+toml
+
+# Server
+fastapi
+uvicorn
+docling
+tiktoken

@@ -1,0 +1,11 @@
+Prompt_Name,System_Prompt,Description,Type,Active,Keywords,Priority
+Market_Analyst,"[PROMPT COMPLETO - ver archivo]","Analista especializado en sizing de mercado, tendencias y análisis competitivo.",Market_Research,TRUE,"market,TAM,SAM,growth,CAGR,industry,mercado,crecimiento",8
+Strategic_Consultant,"[PROMPT COMPLETO]","Consultor para síntesis estratégica y recomendaciones ejecutivas.",Strategy,TRUE,"strategy,recommendation,roadmap,executive,estrategia",7
+Regulatory_Expert,"[PROMPT COMPLETO]","Experto en análisis regulatorio y compliance.",Regulatory,TRUE,"regulation,compliance,directive,law,EPR,regulación,normativa",8
+Technology_Analyst,"[PROMPT COMPLETO]","Analista de tecnología e innovación.",Technology,TRUE,"technology,innovation,AI,digital,automation,tecnología",7
+Sustainability_Expert,"[PROMPT COMPLETO]","Experto en sostenibilidad y economía circular.",Sustainability,TRUE,"sustainability,circular,recycling,carbon,sostenibilidad",8
+Competitive_Intel,"[PROMPT COMPLETO]","Analista de inteligencia competitiva.",Competitive,TRUE,"competitor,benchmark,competitive,competidor",7
+Financial_Analyst,"[PROMPT COMPLETO]","Analista financiero para valoración y análisis.",Financial,TRUE,"financial,investment,ROI,business case,financiero",7
+Startup_Scout,"[PROMPT COMPLETO]","Scout para identificación de startups.",Innovation,TRUE,"startup,venture,funding,acquisition",6
+Risk_Analyst,"[PROMPT COMPLETO]","Analista de riesgos estratégicos.",Risk,TRUE,"risk,threat,mitigation,scenario,riesgo",6
+General_Researcher,"[PROMPT COMPLETO]","Investigador generalista para cualquier tema.",General,TRUE,"",5

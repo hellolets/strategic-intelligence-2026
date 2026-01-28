@@ -1,0 +1,218 @@
+# ==============================================
+# ⚙️  CONFIGURACIÓN RÁPIDA - CAMBIAR AQUÍ
+# ==============================================
+# 🎯 PERFIL DE EJECUCIÓN
+#    "TEST"                 → 💰 MÁS BARATO (modelos gratuitos)
+#    "ECONOMIC"             → 💵 ECONÓMICO (modelos económicos)
+#    "PRODUCTION"           → 💎 CARO (modelos premium, mejor calidad)
+#    "PRODUCTION_OPTIMIZED" → ✨ RECOMENDADO (mejor relación calidad/precio)
+# ==============================================
+
+[general]
+# Perfil activo: TEST | ECONOMIC | PRODUCTION | PRODUCTION_OPTIMIZED
+profile = "ECONOMIC"
+
+# Audiencia objetivo del documento
+target_audience = "CEO/Directivos"
+
+# Idioma de los informes generados
+report_language = "English"
+
+# Límite de tareas simultáneas (concurrencia)
+concurrency_limit = 7
+
+# If consolidated markdown exceeds this length, use premium models for polish/summary
+consolidator_premium_threshold_chars = 120000
+
+# Upload generated Word documents to R2 storage
+upload_to_r2 = false
+
+# Enable plot generation
+enable_plots = true
+
+# ==============================================
+# 💎 PERFIL: PRODUCTION (Calidad Máxima)
+# ==============================================
+[profiles.PRODUCTION]
+tavily_search_depth = "advanced"
+enable_verifier = true
+
+[profiles.PRODUCTION.roles]
+matcher = { provider = "openrouter", model = "deepseek/deepseek-chat", temperature = 0.0 }
+planner = { provider = "openrouter", model = "deepseek/deepseek-chat", temperature = 0.0 }
+judge = { provider = "openrouter", model = "openai/gpt-4o", temperature = 0.0 }
+analyst = { provider = "openrouter", model = "anthropic/claude-3.5-sonnet", temperature = 0.3 }
+ploter = { provider = "openrouter", model = "openai/gpt-4o", temperature = 0.0 }
+consolidator = { provider = "openrouter", model = "google/gemini-2.5-flash", temperature = 0.0 }
+consolidator_polish = { provider = "openrouter", model = "anthropic/claude-3.5-sonnet", temperature = 0.0 }
+consolidator_summary = { provider = "openrouter", model = "anthropic/claude-3.5-sonnet", temperature = 0.0 }
+consolidator_polish_premium = { provider = "openrouter", model = "google/gemini-2.5-flash", temperature = 0.0 }
+
+
+# ==============================================
+# ✨ PERFIL: PRODUCTION_OPTIMIZED (Pipeline Trick 2026)
+# Pipeline: Flash-Lite (portero) + Flash (analista)
+# ==============================================
+[profiles.PRODUCTION_OPTIMIZED]
+tavily_search_depth = "advanced"
+enable_verifier = true
+
+[profiles.PRODUCTION_OPTIMIZED.roles]
+matcher = { provider = "openrouter", model = "google/gemini-2.5-flash-lite", temperature = 0.0 }
+planner = { provider = "openrouter", model = "google/gemini-2.5-flash-lite", temperature = 0.0 }
+judge = { provider = "openrouter", model = "google/gemini-2.5-flash-lite", temperature = 0.0 }
+analyst = { provider = "openrouter", model = "google/gemini-2.5-flash", temperature = 0.3 }
+ploter = { provider = "openrouter", model = "google/gemini-2.5-flash", temperature = 0.0 }
+consolidator = { provider = "openrouter", model = "google/gemini-2.5-flash", temperature = 0.0 }
+consolidator_polish = { provider = "openrouter", model = "google/gemini-2.5-flash", temperature = 0.0 }
+consolidator_summary = { provider = "openrouter", model = "google/gemini-2.5-flash", temperature = 0.0 }
+consolidator_polish_premium = { provider = "openrouter", model = "google/gemini-2.5-flash", temperature = 0.0 }
+consolidator_summary_premium = { provider = "openrouter", model = "google/gemini-2.5-flash", temperature = 0.0 }
+
+# ==============================================
+# 💵 PERFIL: ECONOMIC (Todo Flash-Lite 2.5)
+# Pipeline: Flash-Lite para todos los roles
+# ==============================================
+[profiles.ECONOMIC]
+tavily_search_depth = "basic"
+enable_verifier = false
+
+[profiles.ECONOMIC.roles]
+matcher = { provider = "openrouter", model = "google/gemini-2.5-flash-lite", temperature = 0.0 }
+planner = { provider = "openrouter", model = "google/gemini-2.5-flash-lite", temperature = 0.0 }
+judge = { provider = "openrouter", model = "google/gemini-2.5-flash-lite", temperature = 0.0 }
+analyst = { provider = "openrouter", model = "google/gemini-2.5-flash-lite", temperature = 0.3 }
+ploter = { provider = "openrouter", model = "google/gemini-2.5-flash-lite", temperature = 0.0 }
+consolidator = { provider = "openrouter", model = "google/gemini-2.5-flash-lite", temperature = 0.0 }
+consolidator_polish = { provider = "openrouter", model = "google/gemini-2.5-flash-lite", temperature = 0.0 }
+consolidator_summary = { provider = "openrouter", model = "google/gemini-2.5-flash-lite", temperature = 0.0 }
+consolidator_polish_premium = { provider = "openrouter", model = "google/gemini-2.5-flash-lite", temperature = 0.0 }
+consolidator_summary_premium = { provider = "openrouter", model = "google/gemini-2.5-flash-lite", temperature = 0.0 }
+
+# ==============================================
+# 💰 PERFIL: TEST (Mínimo Coste)
+# ==============================================
+[profiles.TEST]
+tavily_search_depth = "basic"
+enable_verifier = false
+
+[profiles.TEST.roles]
+matcher = { provider = "openrouter", model = "xiaomi/mimo-v2-flash:free", temperature = 0.0 }
+planner = { provider = "openrouter", model = "xiaomi/mimo-v2-flash:free", temperature = 0.0 }
+judge = { provider = "openrouter", model = "xiaomi/mimo-v2-flash:free", temperature = 0.0, max_tokens = 1200 }
+analyst = { provider = "openrouter", model = "xiaomi/mimo-v2-flash:free", temperature = 0.3, max_tokens = 8192 }
+ploter = { provider = "openrouter", model = "xiaomi/mimo-v2-flash:free", temperature = 0.0, max_tokens = 4096 }
+consolidator = { provider = "openrouter", model = "xiaomi/mimo-v2-flash:free", temperature = 0.0, max_tokens = 8192 }
+consolidator_polish = { provider = "openrouter", model = "xiaomi/mimo-v2-flash:free", temperature = 0.0, max_tokens = 8192 }
+consolidator_summary = { provider = "openrouter", model = "xiaomi/mimo-v2-flash:free", temperature = 0.0, max_tokens = 4096 }
+consolidator_polish_premium = { provider = "openrouter", model = "xiaomi/mimo-v2-flash:free", temperature = 0.0, max_tokens = 8192 }
+consolidator_summary_premium = { provider = "openrouter", model = "xiaomi/mimo-v2-flash:free", temperature = 0.0, max_tokens = 4096 }
+
+# ==============================================
+# OTROS AJUSTES (COMUNES)
+# ==============================================
+
+[context]
+source = "airtable"
+local_folder = "private_context"
+
+[providers.openai]
+enabled = true
+base_url = ""
+
+[providers.gemini]
+enabled = true
+base_url = ""
+
+[providers.deepseek]
+enabled = true
+base_url = "https://api.deepseek.com"
+
+[providers.openrouter]
+enabled = true
+base_url = "https://openrouter.ai/api/v1"
+
+[tools]
+tavily_enabled = true
+exa_enabled = true
+serper_enabled = false
+
+[firecrawl]
+enabled = true
+only_for_validated_sources = true
+max_chars_per_source = 15000
+timeout_seconds = 20           # Reducido de 30s para evitar bloqueos largos
+max_calls_per_item = 5         # Reducido de 7 a 5 para balance velocidad/calidad
+min_existing_content_chars = 4000  # Aumentado de 3000 para evitar scrapes innecesarios
+
+[search_policy]
+general_min_sources = 7
+critical_min_sources = 10
+general_queries_iter1 = 6
+general_results_iter1 = 5
+general_queries_iter2 = 4
+general_results_iter2 = 8
+critical_queries_iter1 = 8
+critical_results_iter1 = 8
+critical_queries_iter2 = 6
+critical_results_iter2 = 10
+max_exa_calls_general = 1
+max_exa_calls_critical = 2
+max_firecrawl_pages_general = 5
+max_firecrawl_pages_critical = 7
+tavily_default_depth = "basic"
+tavily_retry_depth = "advanced"
+
+[references]
+enable_hyperlinks = true
+style = "IEEE"
+
+[references.link_style]
+font = "Calibri"
+size_pt = 10
+blue = true
+underline = true
+
+[airtable]
+items_table_name = "Items_indice"
+proyectos_table_name = "Proyectos"
+prompts_table_name = "System_Prompts"
+
+[search]
+excluded_domains = [
+    "zhihu.com", "baidu.com", "baike.baidu.com", "sina.com.cn", "sohu.com",
+    "qq.com", "163.com", "weibo.com", "douban.com", "quora.com", "reddit.com",
+    "blogspot.com", "wordpress.com", "tumblr.com", "answers.com", "yahoo.com/answers",
+    "ask.com", "ehow.com", "wikihow.com"
+]
+max_chars_per_source = 10000
+max_search_queries = 6
+max_results_per_query = 3
+exa_max_characters = 10000
+smart_search_enabled = true
+
+[evaluator]
+total_score_threshold = 8
+relevance_score_threshold = 8
+authenticity_score_threshold = 7
+reliability_score_threshold = 7
+min_accepted_sources = 7
+max_accepted_sources = 15
+elite_fast_track_enabled = true
+gray_zone_enabled = true
+gray_zone_low_reject = 5.5
+gray_zone_high_accept = 7.5
+consulting_min_relevance = 7.0
+institutional_min_relevance = 5.5
+general_media_min_relevance = 8.5
+general_media_max_ratio = 0.1
+consulting_max_ratio = 0.3
+
+[optimizations]
+cache_enabled = true
+cache_ttl_days = 7
+extractor_enabled = false  # Disable slow evidence extraction (uses free models)
+elite_fast_track_enabled = true
+query_expansion_enabled = true
+context_query_variants_enabled = true
+url_validation_enabled = true
