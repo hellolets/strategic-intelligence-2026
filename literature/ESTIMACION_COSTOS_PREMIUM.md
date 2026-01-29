@@ -38,7 +38,7 @@ Basado en el uso típico de tokens por rol (70% input, 30% output):
 | Verifier | ~8,000 | 5,600 | 2,400 | $0.0070 | $0.0120 | **$0.0190** |
 | Ploter | ~3,000 | 2,100 | 900 | $0.0026 | $0.0045 | **$0.0071** |
 
-**Total por reporte individual**: **~$0.2499** (aproximadamente **25 centavos**)
+**Total por reporte individual**: **~$0.2499** (aproximadamente **25 céntimos**)
 
 ---
 
