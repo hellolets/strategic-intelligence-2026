@@ -6,29 +6,60 @@ MEJORA 2026-01: Chunking inteligente de fuentes
 - Incluye fuentes completas hasta llenar el límite
 - Solo trunca la última fuente si es necesario
 """
+import re
+import json
+import os
 import time
+import asyncio
 from typing import List, Dict, Optional, Tuple, Any
 from .config import (
     llm_analyst,
     llm_analyst_fast,
     llm_analyst_precision,
-    model_config,
+    REPORT_LANGUAGE,
+    REFERENCES_STYLE,
     TOML_CONFIG,
     USE_DEEPSEEK_FOR_TESTING,
     USE_CHEAP_OPENROUTER_MODELS,
     get_model_limits
 )
+from .utils import count_tokens, canonicalize_url
 from .prompts import reporter_prompt
-from .utils import count_tokens
 
 # Configuración global
-REPORT_LANGUAGE = TOML_CONFIG["general"].get("report_language", "Español")
-REFERENCES_STYLE = TOML_CONFIG["references"].get("style", "IEEE")
+# REPORT_LANGUAGE y REFERENCES_STYLE ahora se importan directamente de config
+# Si se desea sobrescribir, se puede hacer aquí, pero la importación ya los trae.
+# REPORT_LANGUAGE = TOML_CONFIG["general"].get("report_language", "Español") # Redundante si se importa
+# REFERENCES_STYLE = TOML_CONFIG["references"].get("style", "IEEE") # Redundante si se importa
 
 
 # ==========================================
 # CHUNKING INTELIGENTE DE FUENTES
 # ==========================================
+
+def _get_heading_level(topic: str) -> str:
+    """
+    Determina el nivel de encabezado (#) basado en la numeración del topic.
+    Ej: "1. Global" -> "##"
+    Ej: "1.1. Subtopic" -> "###"
+    """
+    if not topic:
+        return "##"
+    # Buscar patrón de numeración tipo 1. 1.1. 1.1.1.
+    match = re.match(r'^(\d+(?:\.\d+)*)\.?\s+', topic.strip())
+    if not match:
+        return "##"
+    
+    number_str = match.group(1)
+    # Contar componentes (puntos + 1)
+    level = len(number_str.split('.'))
+    
+    # Mapeo:
+    # Nivel 1 (X.) -> ## (H2)
+    # Nivel 2 (X.X.) -> ### (H3)
+    # Nivel 3 (X.X.X.) -> #### (H4)
+    # Clampear a máximo 6 hashtags
+    return "#" * min(6, level + 1)
 
 def _get_source_score(source: Dict) -> float:
     """Obtiene el score de relevancia de una fuente."""
@@ -67,11 +98,11 @@ def _chunk_sources_by_relevance(
     # 1. Ordenar fuentes por score de relevancia (mayor primero)
     sorted_sources = sorted(sources, key=_get_source_score, reverse=True)
 
-    # deduplicate sorted_sources by URL
+    # Deduplicar manteniendo el orden de relevancia
     unique_sorted = []
     seen = set()
     for s in sorted_sources:
-        u = s.get('url', '').rstrip('/').lower()
+        u = canonicalize_url(s.get('url', ''))
         if u and u not in seen:
             unique_sorted.append(s)
             seen.add(u)
@@ -242,7 +273,7 @@ def _ensure_references_section(report: str, sources: List[Dict]) -> str:
         ref_url_pattern = r'https?://[^\s\n]+'
         ref_urls_found = set()
         for match in re.finditer(ref_url_pattern, ref_section_text):
-            ref_url = normalize_url(match.group(0).rstrip('.,;)]'))
+            ref_url = canonicalize_url(match.group(0).rstrip('.,;)]'))
             ref_urls_found.add(ref_url)
             
         # Filtrar la sección de referencias existente para eliminar las NO citadas
@@ -269,13 +300,13 @@ def _ensure_references_section(report: str, sources: List[Dict]) -> str:
         
         # Mapear fuentes por su índice 1-based (el que usa el LLM en el prompt)
         for i, source in enumerate(sources, 1):
-            url = normalize_url(source.get('url', ''))
+            url = canonicalize_url(source.get('url', ''))
             # Si la fuente está citada y su URL no está en lo que queda de la lista
             if i in cited_nums:
                 # Verificar si el URL de la fuente i ya está en el texto filtrado
                 found_in_filtered = False
                 for line in filtered_ref_lines:
-                    if url and url in normalize_url(line):
+                    if url and url in canonicalize_url(line):
                         found_in_filtered = True
                         break
                 
@@ -457,8 +488,8 @@ async def generate_markdown_report(
 INSTRUCCIONES DE ESTRUCTURA Y FORMATO OBLIGATORIAS:
 1. IDIOMA: Escribe el reporte íntegramente en {lang}.
 2. ESTRUCTURA DEL REPORTE (CRÍTICO - NO OMITIR):
-   - Empieza directamente con el título del tema en texto plano: {topic}
-   - Sigue con el contenido redactado de forma profesional y sintetizada.
+   - 🚨 IMPORTANTE: NO incluyas el título del tema al principio. El título será añadido automáticamente por el sistema.
+   - Empieza directamente con el contenido redactado de forma profesional y sintetizada.
    - 🚨 OBLIGATORIO: DEBES finalizar el reporte con la sección de referencias: ## References
    - ❌ PROHIBIDO: Finalizar el reporte sin la sección ## References
    - La sección ## References es OBLIGATORIA y debe estar al final del documento
@@ -682,8 +713,8 @@ Información privada (solo si el tema EXPLICITAMENTE lo requiere):
 {context_private_text}
 
 🚨 RECORDATORIO FINAL OBLIGATORIO:
+- NO incluyas el título del tema en el reporte.
 - El reporte DEBE terminar con la sección ## References
-- DEBES incluir TODAS las fuentes listadas arriba en la sección ## References
 - Formato: [Número] Título - URL para cada fuente
 - NO omitas la sección ## References bajo ningún concepto
 
@@ -990,6 +1021,22 @@ Genera el reporte siguiendo las reglas de formato especificadas."""
         if not report or len(report.strip()) < 100:
             raise ValueError(f"El LLM devolvió un reporte vacío o muy corto ({len(report) if report else 0} caracteres)")
         
+        # Determinar nivel de encabezado y añadir título
+        header_prefix = _get_heading_level(topic)
+        title_line = f"{header_prefix} {topic.strip()}"
+        
+        # Eliminar posible repetición del título generada por el LLM al inicio
+        # Buscamos si la primera línea (ignorando hashtags o no) coincide con el topic
+        report_lines = report.split('\n')
+        if report_lines:
+            first_line = re.sub(r'^#+\s*', '', report_lines[0]).strip()
+            topic_clean = re.sub(r'^#+\s*', '', topic).strip()
+            if first_line.lower() == topic_clean.lower():
+                report = '\n'.join(report_lines[1:]).strip()
+
+        # Concatenar título y reporte
+        report = f"{title_line}\n\n{report}"
+
         # Auto-corrección: Agregar sección ## References si falta
         report = _ensure_references_section(report, all_sources)
 

@@ -201,11 +201,11 @@ DESCRIPTION: {project_description}
     - Strategic implications for the company
     - 3-5 prioritized actionable recommendations with timeframes]
    
-   ## 1. [First Section Title]
-   [Content with subsections 1.1, 1.2, etc.]
+   ## [First Section Title]
+   [Full chapter content with its subsections 1.1, 1.2, etc.]
    
-   ## 2. [Second Section Title]
-   [Continue with remaining sections...]
+   ## [Next Section Title]
+   [Continue with all remaining chapters, following their original numbering...]
    
    ## Conclusions and Recommendations
    [Final synthesis with prioritized action items]
