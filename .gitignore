@@ -20,6 +20,9 @@ wheels/
 .installed.cfg
 *.egg
 
+# Reports
+reports/
+
 # Virtual Environments
 .venv
 venv

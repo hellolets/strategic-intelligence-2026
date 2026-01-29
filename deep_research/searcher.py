@@ -175,11 +175,11 @@ async def execute_exa_step(query: str, max_results: int) -> List[Dict]:
 
     try:
         response = await asyncio.to_thread(
-            exa_client.search,
+            exa_client.search_and_contents,
             query=query,
             num_results=max_results,
-            type='neural',
-            contents={'text': {'max_characters': EXA_MAX_CHARACTERS}}
+            use_autoprompt=True,
+            text={'max_characters': EXA_MAX_CHARACTERS}
         )
         
         res = []
