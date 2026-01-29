@@ -23,7 +23,13 @@ from .config import (
     USE_CHEAP_OPENROUTER_MODELS,
     get_model_limits
 )
-from .utils import count_tokens, canonicalize_url
+from .reference_consolidator import (
+    extract_references_from_report,
+    standardize_references_by_appearance,
+    format_references_section,
+    canonicalize_url
+)
+from .utils import count_tokens
 from .prompts import reporter_prompt
 
 # Configuración global
@@ -124,8 +130,9 @@ def _chunk_sources_by_relevance(
         content = content[:max_chars_per_source] if content else 'N/A'
 
         # Formatear la fuente
+        source_id = source.get('original_num', i + 1)
         source_text = (
-            f"[{i+1}] Título: {source.get('title', 'N/A')}\n"
+            f"[{source_id}] Título: {source.get('title', 'N/A')}\n"
             f"URL: {source.get('url', 'N/A')}\n"
             f"Score: {_get_source_score(source):.1f}\n"
             f"Contenido: {content}"
@@ -147,8 +154,9 @@ def _chunk_sources_by_relevance(
                 available_chars = int(remaining_tokens * chars_per_token * 0.8)  # 80% de margen
                 truncated_content = content[:available_chars] + "\n[... contenido truncado ...]"
 
+                source_id = source.get('original_num', i + 1)
                 truncated_source_text = (
-                    f"[{i+1}] Título: {source.get('title', 'N/A')}\n"
+                    f"[{source_id}] Título: {source.get('title', 'N/A')}\n"
                     f"URL: {source.get('url', 'N/A')}\n"
                     f"Score: {_get_source_score(source):.1f}\n"
                     f"Contenido: {truncated_content}"
@@ -213,165 +221,6 @@ def _clean_report_metadata(report: str) -> str:
     return cleaned_report
 
 
-def _ensure_references_section(report: str, sources: List[Dict]) -> str:
-    """
-    Asegura que el reporte tenga una sección ## References al final.
-    Si no existe, la crea automáticamente con todas las fuentes proporcionadas.
-    Si existe pero está incompleta, agrega las fuentes faltantes.
-    """
-    import re
-    
-    # Normalizar URLs para comparación (sin trailing slash, lowercase)
-    def normalize_url(url: str) -> str:
-        if not url or url == 'N/A':
-            return ''
-        return url.rstrip('/').lower()
-    
-    # Extraer URLs de las fuentes
-    source_urls = {normalize_url(s.get('url', '')): s for s in sources if normalize_url(s.get('url', ''))}
-    
-    # Verificar si existe sección ## References (más robusto)
-    # Buscamos todas las ocurrencias para consolidarlas
-    all_ref_headers = list(re.finditer(r'##\s*References\s*[:\-]*\s*\n?', report, re.IGNORECASE))
-    
-    if all_ref_headers:
-        # Usar la primera ocurrencia como ancla
-        first_match = all_ref_headers[0]
-        ref_start_pos = first_match.start()
-        
-        # El "cuerpo" del reporte es todo lo anterior a la primera sección de referencias
-        body_text = report[:ref_start_pos]
-        # La sección de referencias es todo lo posterior (pero limpiaremos otros headers repetidos)
-        ref_section_raw = report[first_match.end():]
-        
-        # Limpiar cualquier otro header "## References" que el LLM haya repetido dentro de la sección
-        ref_section_text = re.sub(r'##\s*References\s*[:\-]*\s*\n?', '', ref_section_raw, flags=re.IGNORECASE)
-        ref_section_text = ref_section_text.strip()
-        
-        # Extraer qué números de referencia se citan realmente en el cuerpo [1], [2], etc.
-        # Buscamos patrones del tipo [1], [1, 2], [1-3]
-        cited_nums = set()
-        # Patrón para [1], [1, 2], [1,2,3]
-        citation_matches = re.findall(r'\[([\d\s,\-]+)\]', body_text)
-        for group in citation_matches:
-            # Separar por comas
-            parts = group.split(',')
-            for part in parts:
-                part = part.strip()
-                if '-' in part:
-                    # Rango [1-3]
-                    try:
-                        start, end = map(int, part.split('-'))
-                        cited_nums.update(range(start, end + 1))
-                    except: pass
-                else:
-                    try:
-                        cited_nums.add(int(part))
-                    except: pass
-        
-        # Extraer URLs y números de las referencias que YA están escritas en la sección de referencias
-        ref_url_pattern = r'https?://[^\s\n]+'
-        ref_urls_found = set()
-        for match in re.finditer(ref_url_pattern, ref_section_text):
-            ref_url = canonicalize_url(match.group(0).rstrip('.,;)]'))
-            ref_urls_found.add(ref_url)
-            
-        # Filtrar la sección de referencias existente para eliminar las NO citadas
-        ref_lines = ref_section_text.split('\n')
-        filtered_ref_lines = []
-        for line in ref_lines:
-            line = line.strip()
-            if not line: continue
-            
-            # Intentar detectar si es una línea de referencia [N]
-            match = re.match(r'^\s*\[(\d+)\]', line)
-            if match:
-                ref_num = int(match.group(1))
-                if ref_num in cited_nums:
-                    filtered_ref_lines.append(line)
-            else:
-                # Si no empieza por [N], lo mantenemos (podría ser texto adicional)
-                filtered_ref_lines.append(line)
-        
-        ref_section_text = "\n".join(filtered_ref_lines)
-        
-        # Identificar fuentes que están CITADAS en el texto pero FALTAN en la lista filtrada
-        missing_sources_texts = []
-        
-        # Mapear fuentes por su índice 1-based (el que usa el LLM en el prompt)
-        for i, source in enumerate(sources, 1):
-            url = canonicalize_url(source.get('url', ''))
-            # Si la fuente está citada y su URL no está en lo que queda de la lista
-            if i in cited_nums:
-                # Verificar si el URL de la fuente i ya está en el texto filtrado
-                found_in_filtered = False
-                for line in filtered_ref_lines:
-                    if url and url in canonicalize_url(line):
-                        found_in_filtered = True
-                        break
-                
-                if not found_in_filtered:
-                    title = source.get('title', 'N/A')
-                    title = re.sub(r'^\[(PDF|HTML|DOC)\]\s*', '', title)
-                    missing_sources_texts.append(f"[{i}] {title} - {source.get('url', 'N/A')}")
-        
-        # Reconstruir el reporte consolidando la sección de referencias
-        new_report = body_text.rstrip() + "\n\n## References\n\n" + ref_section_text
-        if missing_sources_texts:
-            print(f"      ⚠️  {len(missing_sources_texts)} fuente(s) citada(s) pero faltantes en la lista, agregándolas...")
-            new_report = new_report.rstrip() + "\n" + "\n".join(missing_sources_texts) + "\n"
-            
-        return new_report
-    
-    # Si no tiene References, agregarla al final (solo las citadas)
-    # Si no hay citas detectadas, por seguridad agregamos todas (modo fallback)
-    
-    # Si no tiene References, agregarla al final
-    print(f"      ⚠️  Sección ## References no detectada, agregándola automáticamente...")
-    
-    # Limpiar el reporte (eliminar espacios finales)
-    report = report.rstrip()
-    
-    # EXTRAER CITAS del texto para el caso fallback
-    cited_nums = set()
-    citation_matches = re.findall(r'\[([\d\s,\-]+)\]', report)
-    for group in citation_matches:
-        parts = group.split(',')
-        for part in parts:
-            part = part.strip()
-            if '-' in part:
-                try:
-                    start, end = map(int, part.split('-'))
-                    cited_nums.update(range(start, end + 1))
-                except: pass
-            else:
-                try:
-                    cited_nums.add(int(part))
-                except: pass
-
-    # Agregar separador si no termina con línea vacía
-    if not report.endswith('\n\n'):
-        if not report.endswith('\n'):
-            report += '\n'
-        report += '\n'
-    
-    # Agregar sección References
-    report += "## References\n\n"
-    
-    # Agregar fuentes: si hay citas, solo las citadas. Si no hay citas, todas (fallback total).
-    sources_to_add = []
-    for i, source in enumerate(sources, 1):
-        if not cited_nums or i in cited_nums:
-            sources_to_add.append((i, source))
-            
-    for i, source in sources_to_add:
-        title = source.get('title', 'N/A')
-        url = source.get('url', 'N/A')
-        # Limpiar título
-        title = re.sub(r'^\[(PDF|HTML|DOC)\]\s*', '', title)
-        report += f"[{i}] {title} - {url}\n"
-    
-    return report
 
 
 async def generate_markdown_report(
@@ -397,13 +246,16 @@ async def generate_markdown_report(
     # Deduplicar todas las fuentes por URL al inicio
     unique_sources = []
     seen_urls = set()
-    for s in all_sources:
-        u = s.get('url', '').rstrip('/').lower()
+    for i, s in enumerate(all_sources):
+        u = canonicalize_url(s.get('url', ''))
         if u and u not in seen_urls:
+            s['original_num'] = len(unique_sources) + 1  # Asignar ID fijo para el LLM
             unique_sources.append(s)
             seen_urls.add(u)
         elif not u:
+            s['original_num'] = len(unique_sources) + 1
             unique_sources.append(s)
+            
     all_sources = unique_sources
 
     if is_test_mode:
@@ -494,92 +346,26 @@ INSTRUCCIONES DE ESTRUCTURA Y FORMATO OBLIGATORIAS:
    - ❌ PROHIBIDO: Finalizar el reporte sin la sección ## References
    - La sección ## References es OBLIGATORIA y debe estar al final del documento
    - ❌ PROHIBIDO: NO generes sección "Executive Summary" ni "Resumen Ejecutivo" - esto se generará en el documento consolidado final
-3. CITAS EN EL TEXTO (ESTILO PROFESIONAL OBLIGATORIO):
-   - Estilo: {ref_style} (IEEE: [1], [2]...).
-   - ORDEN: Las citas deben numerarse consecutivamente en orden de aparición ([1], luego [2], etc.).
-   - REGLA CRÍTICA: CADA DATO ESPECÍFICO (números, estadísticas, porcentajes, fechas, nombres propios, cifras) 
-     DEBE tener su cita correspondiente al final del párrafo donde aparece.
-   - REGLAS DE ESTILO (VER ABAJO SECCIÓN DETALLADA DE EJEMPLOS).
-   
-4. SECCIÓN DE REFERENCIAS (## References):
-   - OBLIGATORIO: Debe incluir TODAS las fuentes que se citaron en el texto.
-   - Formato por cada fuente: [Número] Título de la fuente - URL
-   - Ejemplo correcto: [1] Market Analysis Report 2024 - https://example.com/report
-   - Ejemplo correcto: [2] Industry Trends and Growth Projections - https://example.com/trends
-   - Las referencias deben numerarse consecutivamente [1], [2], [3]... según orden de primera aparición en el texto
-   - Formato exacto requerido: [N] Título - URL (con guión " - " separando título y URL)
-   - ❌ INCORRECTO: [1] URL (falta título)
-   - ❌ INCORRECTO: [1] Título URL (falta separador)
-   - ❌ INCORRECTO: Título - URL (falta [Número])
+3. CITAS EN EL TEXTO (ESTILO PROFESIONAL):
+   - Usa el formato IEEE [N] utilizando el ID asignado a cada fuente en la lista de abajo.
+   - 🚨 IMPORTANTE: DEBES usar el ID exacto que aparece en la lista de fuentes (ej: [1], [5], [12]). No intentes reordenarlos ni inventar nuevos números.
+   - REGLA DE ORO: Cada dato específico (porcentajes, cifras, fechas, estadísticas, nombres propios) DEBE tener su cita [N] al final del párrafo.
+   - Agrupa referencias con comas: [1, 3, 5]. Máximo 3 por grupo.
 
-5. REGLAS DE ORO:
+4. CONTROL DE ESTRUCTURA:
+   - No resumas fuente por fuente; agrupa por temas de forma fluida.
+   - ❌ PROHIBIDO: Crear nuevos títulos con # o ## dentro del reporte. Todo el cuerpo debe ser texto redactado.
+   - Para apartados internos, usa negrita o listas si es necesario, pero nunca hashtags adicionales.
+   - No incluyas "Executive Summary" ni "Resumen Ejecutivo".
+   - El reporte debe ser auto-contenido y profesional.
 
-   **🎯 GUÍA DETALLADA DE ESTILO PROFESIONAL PARA CITAS (OBLIGATORIO):**
-   
-   ❌ ESTILO INCORRECTO (Excesivo, poco profesional):
-   ```
-   The company is a leader [1][2][3]. The organization has strong growth [4][5].
-   Bank of America recognizes this [1][2]. The pricing power is evident [1][2][6].
-   ```
-   
-   ✅ ESTILO CORRECTO (Profesional, académico):
-   ```
-   The company is a global leader in its sector, strategically 
-   positioned for significant growth by 2026. Market analysts have recognized 
-   the company as a top pick, driven by strong pricing power in its regional 
-   portfolio, which is expected to achieve significant growth through 2029 [1, 2].
-   ```
-   
-   **PRINCIPIOS NO NEGOCIABLES:**
-   
-   1. **CITA AL FINAL DEL PÁRRAFO (OBLIGATORIO PARA DATOS ESPECÍFICOS):**
-      - Cada dato específico mencionado (porcentajes, cifras, fechas, estadísticas, nombres propios, montos) 
-        DEBE tener su cita correspondiente al final del párrafo.
-      - Si un párrafo contiene múltiples datos específicos de diferentes fuentes, agrupa las citas: [1, 2, 3] al final.
-      - Si todos los datos del párrafo vienen de la misma fuente, usa una sola cita: [1].
-      - ❌ NO cites frase por frase, pero SÍ cita cada párrafo que contenga datos específicos.
-   
-   2. **AGRUPA REFERENCIAS:**
-      - Usa [1, 2, 3] con comas al final del párrafo.
-      - ❌ NUNCA uses [1][2][3].
-      - MÁXIMO 3 referencias por grupo: [1, 2, 3]. Si hay más datos, elige las 3 fuentes más relevantes.
-      - Si tienes 4+ fuentes con datos relevantes, prioriza las más confiables y agrupa: [1, 2, 3].
-   
-   3. **FRECUENCIA OBLIGATORIA:**
-      - Cada párrafo que contenga datos específicos DEBE tener al menos 1 cita al final.
-      - Si un párrafo tiene solo texto descriptivo sin datos concretos, puede no llevar cita (caso excepcional).
-      - Párrafos con datos numéricos, estadísticas o información verificable: SIEMPRE citar.
-   
-   4. **PRIORIDAD DE FUENTES:**
-      - Cita fuentes primarias (informes oficiales) antes que noticias secundarias.
-      - Si tienes el mismo dato en múltiples fuentes, cita la más confiable primero.
+5. SECCIÓN DE REFERENCIAS:
+   - Debes incluir una sección ## References al final con las fuentes usadas para tu propia coherencia, pero el sistema la estandarizará automáticamente basándose en el orden de aparición.
 
-5. REGLAS FUNDAMENTALES:
-   - No resumas fuente por fuente; agrupa por temas.
-   - Sé directo y ejecutivo.
-   - No te inventes nuevos capítulos, es decir, no crees nuevos títulos con # o ## o del estilo.
-   - Usa SOLAMENTE la información de las fuentes proporcionadas.
-   - No crees nuevos títulos dentro del reporte con # o ## o del estilo. Todo tiene que estar redactado.
-   - Si quieres crear apartados, usa el símbolo * para crearlo en negrita, pero NUNCA crees nuevos títulos.
-   - No utilices bullet points a menos que estos sean necesarios para la redacción. La redacción debe ser extensa y detallada.
-
-8. 🚫 PROHIBIDO INCLUIR METADATOS O PROCESO DE GENERACIÓN (CRÍTICO):
-   - ❌ PROHIBIDO incluir mensajes sobre tu proceso de trabajo como:
-     * "Drafting the Report", "Finalizing the Report", "I'm now drafting", "I'm starting with", "I'm reviewing"
-     * "I'm now finalizing", "I'm confident that", "I've completed the draft"
-     * Cualquier texto que describa lo que estás haciendo o pensando
-   - ❌ PROHIBIDO incluir Confidence Scores, badges, o métricas de confianza en el contenido del reporte
-   - ❌ PROHIBIDO incluir mensajes como "🟢 Confidence Score: 100/100" o similares
-   - ❌ PROHIBIDO incluir cualquier texto que no sea el contenido real del reporte
-   - ✅ SOLO incluye el contenido del reporte: título, texto redactado, y sección de referencias
-   - ✅ Empieza directamente con el título del tema y el contenido, sin preámbulos ni metadatos
-   - ✅ El reporte debe ser el contenido final, no una descripción del proceso de generación
-
-IMPORTANTE!!:
-   - SOLAMENTE tiene que tener HASHTAGS # el título del tema y ## la sección de referencias.
-   - No crees nuevos títulos dentro del reporte con HASHTAGS: # o ##. Todo tiene que estar redactado.
-   - No incluyas la información privada a menos que el título del reporte se refiera explícitamente a la empresa cliente.
-   - NO incluyas metadatos, mensajes de proceso, o cualquier texto que no sea el contenido real del reporte.
+6. REGLAS ANTI-ALUCINACIÓN (ZONA ROJA):
+   - NUNCA inventes datos numéricos, fechas o nombres que no estén en las fuentes.
+   - Si no hay información sobre un punto, indícalo explícitamente ("No se dispone de información sobre...").
+   - Reproduce los rangos y cifras exactamente como aparecen en las fuentes.
 
 6. ALINEACIÓN TOTAL TEMA-PROYECTO DE INVESTIGACIÓN:
    - Todo lo que escribas sobre '{topic}' debe responder a una pregunta: ¿Cómo contribuye esto al objetivo del proyecto '{project_name}'?
@@ -1037,15 +823,23 @@ Genera el reporte siguiendo las reglas de formato especificadas."""
         # Concatenar título y reporte
         report = f"{title_line}\n\n{report}"
 
-        # Auto-corrección: Agregar sección ## References si falta
-        report = _ensure_references_section(report, all_sources)
+        # Estandarizar citas y sección ## References
+        # 1. Separar contenido de lo que el LLM generó (por si incluyó referencias)
+        content_only, _ = extract_references_from_report(report)
+        
+        # 2. Renumerar basándose en los IDs que le pasamos (all_sources)
+        # Esto es mucho más robusto que fiarse de la lista que genere el LLM
+        std_content, std_refs = standardize_references_by_appearance(content_only, all_sources)
+        
+        # 3. Regenerar la sección de referencias limpia y ordenada
+        style = (reference_style or REFERENCES_STYLE or "IEEE").upper()
+        clean_ref_section = format_references_section(std_refs, style)
+        
+        # 4. Reensamblar
+        report = std_content.rstrip() + "\n" + clean_ref_section
 
-        from .utils import count_tokens
-        full_prompt_text = system_msg + "\n" + user_msg
-        tokens = count_tokens(full_prompt_text)
-
-        print(f"      ✅ Reporte generado exitosamente ({len(report)} caracteres, ~{tokens} tokens)")
-        return report, tokens
+        print(f"      ✅ Reporte generado exitosamente ({len(report)} caracteres)")
+        return report, final_tokens
 
     except Exception as e:
         import traceback
@@ -1087,11 +881,13 @@ Genera el reporte siguiendo las reglas de formato especificadas."""
         else:
             report += f"No se encontraron fuentes suficientes para generar un reporte completo sobre {topic}.\n\n"
         
-        # CRÍTICO: Agregar sección ## References al fallback también
-        report = _ensure_references_section(report, all_sources)
+        # CRÍTICO: Estandarizar citas y sección ## References al fallback también
+        content_only, refs_extracted = extract_references_from_report(report)
+        std_content, std_refs = standardize_references_by_appearance(content_only, refs_extracted)
+        clean_ref_section = format_references_section(std_refs, (reference_style or REFERENCES_STYLE or "IEEE").upper())
+        report = std_content.rstrip() + "\n" + clean_ref_section
         
         # Calcular tokens del fallback también
-        from .utils import count_tokens
         tokens = count_tokens(report)
         return report, tokens
 

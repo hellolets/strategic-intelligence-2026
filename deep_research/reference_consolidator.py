@@ -329,7 +329,7 @@ def format_references_section(unique_refs: List[Dict], style: str = "IEEE") -> s
     # Ordenar por número para mantener orden secuencial
     deduplicated_refs.sort(key=lambda x: x.get('num', 0))
     
-    section = "\n\n\\newpage\n\n## References\n\n"
+    section = "\n\n## References\n\n"
     
     for ref in deduplicated_refs:
         if style.upper() == "IEEE":
@@ -432,3 +432,77 @@ def print_validation_summary(issues: Dict):
     
     if not any([issues['sin_titulo'], issues['duplicados'], issues['huerfanos'], issues['fantasmas']]):
         print(f"         ✅  Sin problemas detectados")
+def standardize_references_by_appearance(content: str, references: List[Dict]) -> Tuple[str, List[Dict]]:
+    """
+    Renumera las referencias de un reporte individual para que sigan un orden 
+    estricto de aparición (1, 2, 3...) y elimina duplicados.
+    
+    Returns:
+        (nuevo_contenido, nuevas_referencias_ordenadas)
+    """
+    if not references:
+        return content, []
+
+    # 1. Mapear número original -> Fuente (Dict)
+    num_to_ref = {ref['original_num']: ref for ref in references}
+    
+    # 2. Identificar orden de aparición en el texto
+    seen_urls_norm = {} # URL normalizada -> nuevo número
+    new_refs = []
+    next_num = 1
+    
+    def get_new_num(old_num):
+        nonlocal next_num
+        ref = num_to_ref.get(old_num)
+        if not ref:
+            return None
+        
+        url_norm = canonicalize_url(ref['url'])
+        if url_norm in seen_urls_norm:
+            return seen_urls_norm[url_norm]
+        
+        current_num = next_num
+        seen_urls_norm[url_norm] = current_num
+        new_refs.append({
+            'num': current_num,
+            'title': ref['title'],
+            'url': ref['url'],
+            'original_num': old_num
+        })
+        next_num += 1
+        return current_num
+
+    # 3. Renumerar el texto en UNA SOLA PASADA para evitar re-procesar números ya cambiados
+    def replace_citation_match(match):
+        inner = match.group(1)
+        # Soportar [1, 2, 3] o [1-3] o [1]
+        
+        # 1. Dividir por comas primero
+        parts = [p.strip() for p in inner.split(',')]
+        nums = []
+        for part in parts:
+            if '-' in part:
+                try:
+                    start, end = map(int, part.split('-'))
+                    nums.extend(range(start, end + 1))
+                except: pass
+            elif part.isdigit():
+                nums.append(int(part))
+        
+        new_nums = []
+        for n in nums:
+            new_n = get_new_num(n)
+            if new_n is not None:
+                new_nums.append(new_n)
+        
+        if not new_nums:
+            return match.group(0) # No se pudo mapear nada, dejar original
+        
+        # Devolver en orden y sin duplicados
+        return '[' + ', '.join(str(n) for n in sorted(set(new_nums))) + ']'
+
+    # Regex que atrapa tanto individuales como grupos: [\d, -]+
+    # Pero siendo cuidadosos con los espacios y el formato
+    new_content = re.sub(r'\[(\d+(?:\s*[\-,\s]\s*\d+)*)\]', replace_citation_match, content)
+    
+    return new_content, new_refs
