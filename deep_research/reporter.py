@@ -67,13 +67,24 @@ def _chunk_sources_by_relevance(
     # 1. Ordenar fuentes por score de relevancia (mayor primero)
     sorted_sources = sorted(sources, key=_get_source_score, reverse=True)
 
+    # deduplicate sorted_sources by URL
+    unique_sorted = []
+    seen = set()
+    for s in sorted_sources:
+        u = s.get('url', '').rstrip('/').lower()
+        if u and u not in seen:
+            unique_sorted.append(s)
+            seen.add(u)
+        elif not u:
+            unique_sorted.append(s)
+
     # 2. Incluir fuentes completas hasta llenar el límite
     sources_text_parts = []
     tokens_used = 0
     sources_included_complete = 0
     max_chars_per_source = 15000  # Límite por fuente individual (para evitar fuentes gigantes)
 
-    for i, source in enumerate(sorted_sources):
+    for i, source in enumerate(unique_sorted):
         content = source.get(content_field, source.get(fallback_field, 'N/A'))
         if not content or content == 'N/A':
             content = source.get(fallback_field, 'N/A')
@@ -188,62 +199,101 @@ def _ensure_references_section(report: str, sources: List[Dict]) -> str:
     # Extraer URLs de las fuentes
     source_urls = {normalize_url(s.get('url', '')): s for s in sources if normalize_url(s.get('url', ''))}
     
-    # Verificar si existe sección ## References
-    ref_match = re.search(r'## References\s*\n(.*?)(?=\n##|$)', report, re.DOTALL | re.IGNORECASE)
+    # Verificar si existe sección ## References (más robusto)
+    # Buscamos todas las ocurrencias para consolidarlas
+    all_ref_headers = list(re.finditer(r'##\s*References\s*[:\-]*\s*\n?', report, re.IGNORECASE))
     
-    if ref_match:
-        # Ya tiene References, verificar si todas las fuentes están incluidas
-        ref_section_text = ref_match.group(1)
+    if all_ref_headers:
+        # Usar la primera ocurrencia como ancla
+        first_match = all_ref_headers[0]
+        ref_start_pos = first_match.start()
         
-        # Extraer URLs de las referencias existentes
-        ref_url_pattern = r'\[(\d+)\]\s*.+?(?:https?://[^\s\n]+)'
+        # El "cuerpo" del reporte es todo lo anterior a la primera sección de referencias
+        body_text = report[:ref_start_pos]
+        # La sección de referencias es todo lo posterior (pero limpiaremos otros headers repetidos)
+        ref_section_raw = report[first_match.end():]
+        
+        # Limpiar cualquier otro header "## References" que el LLM haya repetido dentro de la sección
+        ref_section_text = re.sub(r'##\s*References\s*[:\-]*\s*\n?', '', ref_section_raw, flags=re.IGNORECASE)
+        ref_section_text = ref_section_text.strip()
+        
+        # Extraer qué números de referencia se citan realmente en el cuerpo [1], [2], etc.
+        # Buscamos patrones del tipo [1], [1, 2], [1-3]
+        cited_nums = set()
+        # Patrón para [1], [1, 2], [1,2,3]
+        citation_matches = re.findall(r'\[([\d\s,\-]+)\]', body_text)
+        for group in citation_matches:
+            # Separar por comas
+            parts = group.split(',')
+            for part in parts:
+                part = part.strip()
+                if '-' in part:
+                    # Rango [1-3]
+                    try:
+                        start, end = map(int, part.split('-'))
+                        cited_nums.update(range(start, end + 1))
+                    except: pass
+                else:
+                    try:
+                        cited_nums.add(int(part))
+                    except: pass
+        
+        # Extraer URLs y números de las referencias que YA están escritas en la sección de referencias
+        ref_url_pattern = r'https?://[^\s\n]+'
         ref_urls_found = set()
-        
         for match in re.finditer(ref_url_pattern, ref_section_text):
-            url_match = re.search(r'(https?://[^\s\n]+)', match.group(0))
-            if url_match:
-                ref_url = normalize_url(url_match.group(1).rstrip('.,;'))
-                ref_urls_found.add(ref_url)
-        
-        # También buscar por formato más flexible
-        url_pattern = r'https?://[^\s\n]+'
-        for match in re.finditer(url_pattern, ref_section_text):
-            ref_url = normalize_url(match.group(0).rstrip('.,;'))
+            ref_url = normalize_url(match.group(0).rstrip('.,;)]'))
             ref_urls_found.add(ref_url)
+            
+        # Filtrar la sección de referencias existente para eliminar las NO citadas
+        ref_lines = ref_section_text.split('\n')
+        filtered_ref_lines = []
+        for line in ref_lines:
+            line = line.strip()
+            if not line: continue
+            
+            # Intentar detectar si es una línea de referencia [N]
+            match = re.match(r'^\s*\[(\d+)\]', line)
+            if match:
+                ref_num = int(match.group(1))
+                if ref_num in cited_nums:
+                    filtered_ref_lines.append(line)
+            else:
+                # Si no empieza por [N], lo mantenemos (podría ser texto adicional)
+                filtered_ref_lines.append(line)
         
-        # Identificar fuentes faltantes
-        missing_sources = []
-        for url, source in source_urls.items():
-            if url and url not in ref_urls_found:
-                missing_sources.append(source)
+        ref_section_text = "\n".join(filtered_ref_lines)
         
-        if missing_sources:
-            # Agregar fuentes faltantes
-            print(f"      ⚠️  {len(missing_sources)} fuente(s) faltante(s) en ## References, agregándolas automáticamente...")
+        # Identificar fuentes que están CITADAS en el texto pero FALTAN en la lista filtrada
+        missing_sources_texts = []
+        
+        # Mapear fuentes por su índice 1-based (el que usa el LLM en el prompt)
+        for i, source in enumerate(sources, 1):
+            url = normalize_url(source.get('url', ''))
+            # Si la fuente está citada y su URL no está en lo que queda de la lista
+            if i in cited_nums:
+                # Verificar si el URL de la fuente i ya está en el texto filtrado
+                found_in_filtered = False
+                for line in filtered_ref_lines:
+                    if url and url in normalize_url(line):
+                        found_in_filtered = True
+                        break
+                
+                if not found_in_filtered:
+                    title = source.get('title', 'N/A')
+                    title = re.sub(r'^\[(PDF|HTML|DOC)\]\s*', '', title)
+                    missing_sources_texts.append(f"[{i}] {title} - {source.get('url', 'N/A')}")
+        
+        # Reconstruir el reporte consolidando la sección de referencias
+        new_report = body_text.rstrip() + "\n\n## References\n\n" + ref_section_text
+        if missing_sources_texts:
+            print(f"      ⚠️  {len(missing_sources_texts)} fuente(s) citada(s) pero faltantes en la lista, agregándolas...")
+            new_report = new_report.rstrip() + "\n" + "\n".join(missing_sources_texts) + "\n"
             
-            # Encontrar el final de la sección References
-            ref_end_pos = ref_match.end()
-            ref_prefix = report[:ref_end_pos]
-            ref_suffix = report[ref_end_pos:]
-            
-            # Contar cuántas referencias ya hay
-            existing_ref_nums = [int(m.group(1)) for m in re.finditer(r'\[(\d+)\]', ref_section_text)]
-            next_ref_num = max(existing_ref_nums) + 1 if existing_ref_nums else 1
-            
-            # Agregar fuentes faltantes
-            missing_refs_text = ""
-            for source in missing_sources:
-                title = source.get('title', 'N/A')
-                url = source.get('url', 'N/A')
-                # Limpiar título de [PDF], [HTML], etc. al inicio si existe
-                title = re.sub(r'^\[(PDF|HTML|DOC)\]\s*', '', title)
-                missing_refs_text += f"[{next_ref_num}] {title} - {url}\n"
-                next_ref_num += 1
-            
-            # Reconstruir reporte con referencias faltantes
-            report = ref_prefix.rstrip() + "\n" + missing_refs_text + ref_suffix.lstrip()
-            
-        return report
+        return new_report
+    
+    # Si no tiene References, agregarla al final (solo las citadas)
+    # Si no hay citas detectadas, por seguridad agregamos todas (modo fallback)
     
     # Si no tiene References, agregarla al final
     print(f"      ⚠️  Sección ## References no detectada, agregándola automáticamente...")
@@ -251,6 +301,23 @@ def _ensure_references_section(report: str, sources: List[Dict]) -> str:
     # Limpiar el reporte (eliminar espacios finales)
     report = report.rstrip()
     
+    # EXTRAER CITAS del texto para el caso fallback
+    cited_nums = set()
+    citation_matches = re.findall(r'\[([\d\s,\-]+)\]', report)
+    for group in citation_matches:
+        parts = group.split(',')
+        for part in parts:
+            part = part.strip()
+            if '-' in part:
+                try:
+                    start, end = map(int, part.split('-'))
+                    cited_nums.update(range(start, end + 1))
+                except: pass
+            else:
+                try:
+                    cited_nums.add(int(part))
+                except: pass
+
     # Agregar separador si no termina con línea vacía
     if not report.endswith('\n\n'):
         if not report.endswith('\n'):
@@ -260,11 +327,16 @@ def _ensure_references_section(report: str, sources: List[Dict]) -> str:
     # Agregar sección References
     report += "## References\n\n"
     
-    # Agregar cada fuente
+    # Agregar fuentes: si hay citas, solo las citadas. Si no hay citas, todas (fallback total).
+    sources_to_add = []
     for i, source in enumerate(sources, 1):
+        if not cited_nums or i in cited_nums:
+            sources_to_add.append((i, source))
+            
+    for i, source in sources_to_add:
         title = source.get('title', 'N/A')
         url = source.get('url', 'N/A')
-        # Limpiar título de [PDF], [HTML], etc. al inicio si existe
+        # Limpiar título
         title = re.sub(r'^\[(PDF|HTML|DOC)\]\s*', '', title)
         report += f"[{i}] {title} - {url}\n"
     
@@ -291,15 +363,18 @@ async def generate_markdown_report(
     llm = None
     is_test_mode = False
     
-    # Determinar si estamos modo test
-    if USE_DEEPSEEK_FOR_TESTING:
-        is_test_mode = True
-    elif hasattr(model_config, 'USE_DEEPSEEK_FOR_TESTING') and model_config.USE_DEEPSEEK_FOR_TESTING:
-        is_test_mode = True
-    elif hasattr(llm_analyst, 'model_name') and 'mimo' in llm_analyst.model_name.lower():
-         # Si el analista por defecto es MiMo, asumir modo económico/test
-        is_test_mode = False
-    
+    # Deduplicar todas las fuentes por URL al inicio
+    unique_sources = []
+    seen_urls = set()
+    for s in all_sources:
+        u = s.get('url', '').rstrip('/').lower()
+        if u and u not in seen_urls:
+            unique_sources.append(s)
+            seen_urls.add(u)
+        elif not u:
+            unique_sources.append(s)
+    all_sources = unique_sources
+
     if is_test_mode:
         # En modo TEST, usar solo el modelo de TEST (xiaomi/mimo-v2-flash:free)
         llm = llm_analyst

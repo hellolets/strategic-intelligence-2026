@@ -22,6 +22,8 @@ wheels/
 
 # Reports
 reports/
+temp_plots/
+debug_sources/
 
 # Virtual Environments
 .venv

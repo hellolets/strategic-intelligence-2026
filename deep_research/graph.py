@@ -139,6 +139,15 @@ async def searcher_node(state: ResearchState) -> ResearchState:
     existing_urls = extract_urls_from_sources(state.get('existing_sources_text', ''))
     rejected_urls = extract_rejected_urls_from_sources(state.get('existing_sources_text', ''))
     
+    # Capa D: También evitar URLs que ya están en el estado actual (validadas o rechazadas en rondas previas del mismo item)
+    from .utils import canonicalize_url
+    current_validated_urls = {canonicalize_url(s.get('url', '')) for s in state.get('validated_sources', []) if s.get('url')}
+    current_rejected_urls = {canonicalize_url(s.get('url', '')) for s in state.get('rejected_sources', []) if s.get('url')}
+    
+    # Combinar todos los filtros para máxima eficiencia
+    all_known_urls = existing_urls.union(rejected_urls).union(current_validated_urls).union(current_rejected_urls)
+    all_known_urls_norm = {canonicalize_url(u) for u in all_known_urls if u}
+    
     # ==========================================
     # CONTEXT MANAGER INTEGRATION (Policy 2)
     # ==========================================
@@ -299,12 +308,8 @@ async def searcher_node(state: ResearchState) -> ResearchState:
                 
             normalized_url = canonicalize_url(source_url)
             
-            # Check contra existentes
-            if any(canonicalize_url(u) == normalized_url for u in existing_urls):
-                continue
-            
-            # Check contra rechazadas previas
-            if any(canonicalize_url(u) == normalized_url for u in rejected_urls):
+            # Check contra fuentes acumuladas (Airtable) y fuentes de la sesión actual (LangGraph State)
+            if normalized_url in all_known_urls_norm:
                 continue
                 
             # Agregar task_topic para contexto del evaluador
