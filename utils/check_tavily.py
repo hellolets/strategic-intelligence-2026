@@ -7,9 +7,9 @@ from tavily import TavilyClient
 
 # Cargar .env
 env_paths = [
-    Path(__file__).parent / "private_context" / ".env",
-    Path(__file__).parent / ".env",
-    Path(__file__).parent / "deep_research" / ".env",
+    Path(__file__).parent.parent / "private_context" / ".env",
+    Path(__file__).parent.parent / ".env",
+    Path(__file__).parent.parent / "deep_research" / ".env",
 ]
 
 for env_path in env_paths:

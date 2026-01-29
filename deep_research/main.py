@@ -96,7 +96,7 @@ if __name__ == "__main__":
         elif mode == 'server':
             # Modo Servidor Web (Webhooks)
             try:
-                from server import start_server
+                from .server import start_server
                 print("\n🚀 INICIANDO MODO SERVIDOR (PUSH)...")
                 start_server()
             except ImportError:

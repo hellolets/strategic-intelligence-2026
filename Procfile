@@ -1,1 +1,1 @@
-worker: python main.py server
+worker: python -m deep_research.main server

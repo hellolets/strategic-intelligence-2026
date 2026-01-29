@@ -33,7 +33,7 @@ try:
 except ImportError:
     import tomli as tomllib
 
-config_path = Path(__file__).parent / "config.toml"
+config_path = Path(__file__).parent.parent / "config.toml"
 if config_path.exists():
     with open(config_path, "rb") as f:
         toml_config = tomllib.load(f)
