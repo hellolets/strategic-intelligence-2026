@@ -105,6 +105,8 @@ def add_external_link(
     font_size_pt: int = 10,
     blue: bool = True,
     underline: bool = True,
+    superscript: bool = False,
+    tooltip: str = None,
 ):
     """
     Inserta un hipervínculo externo (clicable) que abre una URL.
@@ -117,24 +119,19 @@ def add_external_link(
         font_size_pt: Tamaño de fuente en puntos
         blue: Si True, colorea el link de azul
         underline: Si True, subraya el link
+        superscript: Si True, aplica formato superíndice
+        tooltip: Texto opcional para la descripción emergente.
     """
     if text is None:
         text = url
     
     hyperlink = OxmlElement("w:hyperlink")
-    # Para links externos usamos r:id, pero python-docx no expone fácilmente las relaciones
-    # Alternativa más simple: usar el atributo w:anchor con la URL completa no funciona para externos
-    # Mejor enfoque: crear un elemento de hyperlink con tgtFrame
     
     # Establecer el target como la URL
     hyperlink.set(qn("w:tgtFrame"), "_blank")  # Abrir en nueva ventana
-    hyperlink.set(qn("w:tooltip"), url)
+    hyperlink.set(qn("w:tooltip"), tooltip or url)
     
     # IMPORTANTE: Para que funcione como link externo, necesitamos añadirlo a las relaciones del documento
-    # Alternativa más robusta: usar add_hyperlink desde python-docx si está disponible
-    # Como python-docx no tiene método directo, usamos un workaround
-    
-    # Crear el parte del relationship
     part = paragraph.part
     r_id = part.relate_to(url, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink", is_external=True)
     hyperlink.set(qn("r:id"), r_id)
@@ -163,6 +160,12 @@ def add_external_link(
     u = OxmlElement("w:u")
     u.set(qn("w:val"), "single" if underline else "none")
     rPr.append(u)
+
+    # Superíndice
+    if superscript:
+        vertAlign = OxmlElement("w:vertAlign")
+        vertAlign.set(qn("w:val"), "superscript")
+        rPr.append(vertAlign)
 
     t = OxmlElement("w:t")
     t.text = text
@@ -201,7 +204,7 @@ def detect_header_level_from_numbering(text):
     return 2
 
 
-def generate_docx_from_markdown(markdown_text: str, output_path: str, plot_data: List[Dict[str, Any]] = None):
+def generate_docx_from_markdown(markdown_text: str, output_path: str, plot_data: List[Dict[str, Any]] = None, reference_map: Dict[str, Dict] = None):
     """
     Genera un archivo .docx a partir de texto en Markdown.
     Soporta:
@@ -622,6 +625,7 @@ def generate_docx_from_markdown(markdown_text: str, output_path: str, plot_data:
                         link_size_pt=int(link_cfg.get("size_pt", 10)),
                         link_blue=bool(link_cfg.get("blue", True)),
                         link_underline=bool(link_cfg.get("underline", True)),
+                        reference_map=reference_map
                     )
                 else:
                     add_formatted_text(p, text)
@@ -683,6 +687,7 @@ def generate_docx_from_markdown(markdown_text: str, output_path: str, plot_data:
                         link_size_pt=int(link_cfg.get("size_pt", 10)),
                         link_blue=bool(link_cfg.get("blue", True)),
                         link_underline=bool(link_cfg.get("underline", True)),
+                        reference_map=reference_map
                     )
                 else:
                     add_formatted_text(p, line)
@@ -864,6 +869,7 @@ def add_text_with_citations(
     link_size_pt: int = 10,
     link_blue: bool = True,
     link_underline: bool = True,
+    reference_map: Dict[str, Dict] = None,
 ):
     """
     Inserta texto con formato básico (negritas) y convierte citas en hipervínculos internos.
@@ -894,7 +900,8 @@ def add_text_with_citations(
                 link_font=link_font,
                 link_size_pt=link_size_pt,
                 link_blue=link_blue,
-                link_underline=link_underline
+                link_underline=link_underline,
+                reference_map=reference_map
             )
         elif re.fullmatch(r"\(\d+(?:\s*,\s*\d+)*\)", tok):
             # Cita con paréntesis: (1) o (1, 2, 3)
@@ -904,7 +911,8 @@ def add_text_with_citations(
                 link_font=link_font,
                 link_size_pt=link_size_pt,
                 link_blue=link_blue,
-                link_underline=link_underline
+                link_underline=link_underline,
+                reference_map=reference_map
             )
         else:
             # Texto normal o con formato (negritas)
@@ -919,7 +927,8 @@ def process_citation_group(
     link_font="Calibri",
     link_size_pt=10,
     link_blue=True,
-    link_underline=True
+    link_underline=True,
+    reference_map: Dict[str, Dict] = None,
 ):
     """
     Procesa una cita que puede ser individual [1] o agrupada [1, 2, 3].
@@ -944,10 +953,37 @@ def process_citation_group(
         paragraph.add_run(citation_text)
         return
     
+    # Si tenemos mapa de referencias, usamos links externos en superíndice
+    if reference_map:
+        for i, num in enumerate(numbers):
+            ref_info = reference_map.get(num)
+            if ref_info and ref_info.get('url'):
+                add_external_link(
+                    paragraph,
+                    url=ref_info['url'],
+                    text=num,
+                    font_name=link_font,
+                    font_size_pt=link_size_pt,
+                    blue=link_blue,
+                    underline=link_underline,
+                    superscript=True,
+                    tooltip=ref_info.get('title')
+                )
+            else:
+                # Fallback por si no está en el mapa
+                run = paragraph.add_run(num)
+                run.font.superscript = True
+            
+            # Coma entre números si hay varios
+            if i < len(numbers) - 1:
+                run_comma = paragraph.add_run(",")
+                run_comma.font.superscript = True
+        return
+
     # Añadir bracket de apertura
     paragraph.add_run(opening)
     
-    # Procesar cada número
+    # Procesar cada número (IEEE Standard)
     for i, num in enumerate(numbers):
         # Añadir hipervínculo para este número
         add_internal_link(

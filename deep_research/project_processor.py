@@ -28,7 +28,8 @@ from .reference_consolidator import (
     extract_references_from_report,
     consolidate_references,
     renumber_citations_in_text,
-    format_references_section
+    format_references_section,
+    canonicalize_url
 )
 from .verifier import _remove_system_generated_sections
 from .report_generator import generate_docx_from_markdown
@@ -144,8 +145,14 @@ def consolidate_specific_project(proyecto_id, project_name, fields):
             all_contents.append({'topic': item['topic'], 'content': content, 'refs': refs})
             all_references.append(refs)
 
-        url_to_new_num, unique_refs = consolidate_references(all_references)
+        # 3. Consolidate References
+        # Sort items first so global numbering (1, 2, 3...) follows the report order
         all_contents_sorted = sorted(all_contents, key=lambda x: sort_items_by_numbering(x['topic']))
+        
+        # Build references list in the sorted order
+        all_references_sorted = [item['refs'] for item in all_contents_sorted]
+        
+        url_to_new_num, unique_refs = consolidate_references(all_references_sorted)
 
         all_reports_text = ""
         for i, item in enumerate(all_contents_sorted, 1):
@@ -232,9 +239,10 @@ DESCRIPTION: {project_description}
    - Do not modify or remove these markers
 
 8. **CITATIONS AND REFERENCES**:
-   - PRESERVE all existing [X] citation numbers
-   - Do NOT generate a References section (it will be added automatically)
-   - Ensure citations are contextually appropriate
+   - PRESERVE all existing [X] citation numbers exactly as they are.
+   - These numbers are already synchronized and unique across the entire consolidated document.
+   - Do NOT renumber, Do NOT generate a References section (this is handled programmatically).
+   - Ensure citations remain attached to their relevant data/claims after consolidation.
 
 9. **QUALITY CHECKLIST** (ensure all are met):
    ✓ Executive Summary covers ALL main sections
@@ -260,8 +268,16 @@ DESCRIPTION: {project_description}
             {"role": "user", "content": user_msg}
         ])
 
-        final_report = response.content.strip() + "\n\n" + ref_section
+        final_report = response.content.strip()
         logger.log_info(f"      ✅ Consolidación LLM completada ({len(final_report):,} chars) en {_time.time() - step_start:.1f}s")
+
+        # Construir mapa de referencias para links directos en Word
+        reference_map = {str(ref['num']): {'url': ref['url'], 'title': ref['title']} for ref in unique_refs}
+
+        # Post-procesamiento: Registro de Referencias (Traceability)
+        registry_path = save_reference_registry(project_name, all_contents_sorted, url_to_new_num)
+        if registry_path:
+            logger.log_info(f"      📋 Registro de referencias generado: {registry_path}")
 
         # Post-procesamiento: Asegurar que [[TOC]] esté presente para generar TOC nativo de Word
         if "[[TOC]]" not in final_report:
@@ -370,7 +386,7 @@ DESCRIPTION: {project_description}
         # Generate and upload Word document first
         try:
              logger.log_info(f"      📄 Generando DOCX: {docx_output_path}")
-             docx_path = generate_docx_from_markdown(final_report, docx_output_path)
+             docx_path = generate_docx_from_markdown(final_report, docx_output_path, reference_map=reference_map)
              logger.log_info(f"      ✅ DOCX generado correctamente")
              if docx_path and UPLOAD_TO_R2:
                   logger.log_info(f"      ☁️ Subiendo a R2...")
@@ -415,3 +431,42 @@ DESCRIPTION: {project_description}
     except Exception as e:
         logger.log_error(f"Consolidation failed: {e}")
         proyectos_table.update(proyecto_id, {"Status": "Error"})
+
+
+def save_reference_registry(project_name, all_contents_sorted, url_to_new_num):
+    """
+    Genera un archivo Markdown con el mapeo de referencias locales a globales para trazabilidad.
+    """
+    safe_name = (project_name or "unnamed_project").replace(" ", "_").replace("/", "_")
+    registry_path = os.path.join("reports", f"reference_registry_{safe_name}.md")
+    
+    os.makedirs("reports", exist_ok=True)
+    
+    table = []
+    table.append("| Capítulo / Item | Cita Local | Cita Global | Título | URL |")
+    table.append("| :--- | :---: | :---: | :--- | :--- |")
+    
+    for item in all_contents_sorted:
+        topic = item['topic']
+        for ref in item.get('refs', []):
+            local_num = ref.get('original_num', '?')
+            url = ref.get('url', '')
+            url_norm = canonicalize_url(url) if url else ''
+            global_num = url_to_new_num.get(url_norm, '?')
+            title = ref.get('title', 'Sin título').replace('|', '-')
+            table.append(f"| {topic} | [{local_num}] | [{global_num}] | {title} | {url} |")
+    
+    registry_content = f"# Registro de Referencias y Trazabilidad\n\n"
+    registry_content += f"**Proyecto:** {project_name}\n\n"
+    registry_content += "Este documento permite rastrear cómo se han mapeado las citas originales de cada capítulo individual "
+    registry_content += "a la numeración global utilizada en el reporte final consolidado.\n\n"
+    registry_content += "\n".join(table)
+    
+    try:
+        with open(registry_path, "w", encoding="utf-8") as f:
+            f.write(registry_content)
+        return registry_path
+    except Exception as e:
+        from .logger import logger
+        logger.log_error(f"Error guardando el registro de referencias: {e}")
+        return None
