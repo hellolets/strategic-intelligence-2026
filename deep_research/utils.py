@@ -604,3 +604,107 @@ def build_hierarchical_context(topic: str, full_index: List[str]) -> str:
         lines.append("  Evita solapar con los temas de tus capítulos hermanos listados arriba.")
 
     return "\n".join(lines)
+
+def clean_and_parse_json(text: str) -> Any:
+    """
+    Limpia y parsea una cadena JSON generada por un LLM.
+    Maneja bloques markdown, caracteres de control no escapados y errores comunes.
+    
+    Args:
+        text: Cadena que contiene JSON (posiblemente rodeada de texto o markdown)
+    
+    Returns:
+        Objeto Python parseado (Dict o List)
+    
+    Raises:
+        json.JSONDecodeError: Si no se puede extraer ni parsear un JSON válido
+    """
+    if not text:
+        return None
+        
+    content = text.strip()
+    
+    # 1. Extraer de bloques Markdown si existen
+    if "```json" in content:
+        content = content.split("```json")[-1].split("```")[0].strip()
+    elif "```" in content:
+        # Si no especifica 'json' pero hay bloques, tomar el más grande
+        blocks = re.findall(r'```(?:json)?\s*(.*?)\s*```', content, re.DOTALL)
+        if blocks:
+            content = max(blocks, key=len).strip()
+    
+    # 2. Si aún parece texto plano con JSON dentro, buscar el primer { o [
+    if not (content.startswith('{') or content.startswith('[')):
+        start_brace = content.find('{')
+        start_bracket = content.find('[')
+        
+        if start_brace != -1 and (start_bracket == -1 or start_brace < start_bracket):
+            end_brace = content.rfind('}')
+            if end_brace != -1:
+                content = content[start_brace:end_brace+1]
+        elif start_bracket != -1:
+            end_bracket = content.rfind(']')
+            if end_bracket != -1:
+                content = content[start_bracket:end_bracket+1]
+
+    # 3. Limpiar caracteres de control no permitidos (0x00-0x1F) 
+    # pero mantener tabulaciones (0x09), saltos de línea (0x0A) y retornos de carro (0x0D)
+    # que json.loads con strict=False puede manejar si están dentro de comillas.
+    # Nota: El error 'Invalid control character' a menudo se refiere a \n sin escapar.
+    
+    # Primero intentamos parseo directo con strict=False (maneja \n en strings)
+    try:
+        return json.loads(content, strict=False)
+    except json.JSONDecodeError:
+        # Si falla, intentar una limpieza más agresiva de caracteres invisibles problemáticos
+        # pero preservar los saltos de línea legítimos convirtiéndolos en espacios 
+        # o escapándolos si están rompiendo la estructura.
+        
+        # Escapar saltos de línea literales dentro de strings (heurística simple)
+        # Esto reemplaza saltos de línea que no están precedidos por comas o corchetes
+        # pero es arriesgado. Mejor limpiar caracteres de control reales < 32.
+        
+        clean_content = "".join(c for c in content if ord(c) >= 32 or c in "\n\r\t")
+        
+        # Eliminar comentarios de estilo JS si el LLM los puso (común en 'chatty' responses)
+        clean_content = re.sub(r'//.*?\n', '\n', clean_content)
+        clean_content = re.sub(r'/\*.*?\*/', '', clean_content, flags=re.DOTALL)
+        
+        # Escapar backslashes solitarios que no son secuencias de escape válidas en JSON
+        clean_content = re.sub(r'\\(?![\\/bfnrtu"]|u[0-9a-fA-F]{4})', r'\\\\', clean_content)
+        
+        # Eliminar comas finales (trailing commas) en objetos y listas
+        # Ej: {"a": 1,} -> {"a": 1} o [1, 2,] -> [1, 2]
+        clean_content = re.sub(r',\s*([\}\]])', r'\1', clean_content)
+        
+        # Intentar arreglar comillas dobles internas no escapadas en strings (heurística limitada)
+        # Esto busca "prop": "valor con "comillas" internas" -> "prop": "valor con \"comillas\" internas"
+        # Buscamos una comilla que NO esté seguida de , } ] o : (que indican estructura de JSON)
+        # y que NO esté precedida por : o [ o { (que indican inicio de valor)
+        # Es arriesgado, así que lo aplicamos con cautela.
+        
+        try:
+            return json.loads(clean_content, strict=False)
+        except json.JSONDecodeError as final_err:
+            # Fallback final: si sigue fallando, intentar extraer solo lo que parece un objeto
+            # Esto es útil si el LLM incluyó texto antes/después que confundió al extractor principal
+            match = re.search(r'(\{.*\})|(\[.*\])', clean_content, re.DOTALL)
+            if match:
+                extracted = match.group(0)
+                # Aplicar limpieza de comas finales también al extracto
+                extracted = re.sub(r',\s*([\}\]])', r'\1', extracted)
+                try:
+                    return json.loads(extracted, strict=False)
+                except:
+                    # Intento desesperado: si es un objeto truncado, intentar cerrarlo
+                    if extracted.startswith('{') and not extracted.endswith('}'):
+                        try:
+                            return json.loads(extracted + '}', strict=False)
+                        except:
+                            pass
+                    elif extracted.startswith('[') and not extracted.endswith(']'):
+                        try:
+                            return json.loads(extracted + ']', strict=False)
+                        except:
+                            pass
+            raise final_err

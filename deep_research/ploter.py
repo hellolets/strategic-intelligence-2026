@@ -15,6 +15,7 @@ from typing import List, Dict, Optional, Any
 from .config import llm_ploter, CURRENT_PLOTER_MODEL, ENABLE_PLOTS, REPORT_LANGUAGE
 from .logger import logger
 from .r2_utils import r2_manager
+from .utils import clean_and_parse_json
 
 # Configuración visual corporativa
 CORPORATE_YELLOW = "#FFD700"
@@ -48,12 +49,13 @@ REGLAS DE DISEÑO (ESTILO CORPORATIVO):
    - SIN marcos (spines) superiores o derechos.
    - SIN TÍTULO interno (el título se gestionará en Word).
 7. Formato: El código DEBE guardar el gráfico usando la variable `SAVE_PATH`. No hardcodees rutas.
+   OBLIGATORIO: Debes incluir la línea `plt.savefig(SAVE_PATH, bbox_inches='tight')` al final.
    Ejemplo: `plt.savefig(SAVE_PATH, bbox_inches='tight')`
 8. Datos: Usa únicamente datos Reales mencionados en el reporte.
 9. Título: Genera un título descriptivo para el gráfico (MÁXIMO 15 PALABRAS). Debe estar en {REPORT_LANGUAGE}.
 10. Palabra de Figura: Indica la palabra correcta para "Figura" o "Gráfico" en el idioma {REPORT_LANGUAGE} (ej: "Figure", "Figura", "Abbildung").
 11. LIBRERÍAS DISPONIBLES: `plt` (matplotlib.pyplot), `sns` (seaborn), `pd` (pandas), `np` (numpy). No intentes importar otras.
-12. MANEJO DE DATOS: Si usas datos categóricos, asegúrate de convertirlos a listas o usar pandas correctamente para evitar errores de tipo de Matplotlib.
+12. MANEJO DE DATOS: Si usas datos que representen números (años, valores, porcentajes), asegúrate de convertirlos a float o int ANTES de graficar. Matplotlib puede fallar o mostrar advertencias si usas strings para datos numéricos.
 13. PARÁMETROS DE MATPLOTLIB (CRÍTICO):
     - `plt.tick_params()` NO acepta `ha` (horizontal alignment). Usa solo: `labelsize`, `labelcolor`, `length`, `width`, `color`, etc.
     - `ha` solo se usa en `plt.text()`, `ax.text()`, o `plt.xlabel()/ylabel()` para alineación de texto.
@@ -117,13 +119,7 @@ Analiza el texto y genera hasta 2 gráficos de alto valor si los datos lo permit
         ])
 
         content = response.content.strip()
-        # Limpiar markdown
-        if "```json" in content:
-            content = content.split("```json")[-1].split("```")[0].strip()
-        elif "```" in content:
-            content = content.split("```")[1].split("```")[0].strip()
-
-        data = json.loads(content)
+        data = clean_and_parse_json(content)
         plots = data.get("plots", [])
         
         final_plots = []
@@ -449,10 +445,13 @@ Analiza el texto y genera hasta 2 gráficos de alto valor si los datos lo permit
                                     logger.log_warning("   - Verifica que todas las comillas simples (') y dobles (\") estén balanceadas")
                                 raise syntax_err
                         
-                        # Verificación final ANTES de ejecutar: corregir cualquier labellabelcolor restante
-                        if 'labellabelcolor' in code_cleaned:
-                            logger.log_warning("⚠️ Detectado 'labellabelcolor' antes de ejecutar. Corrigiendo...")
-                            code_cleaned = re.sub(r'labellabelcolor', r'labelcolor', code_cleaned)
+                        # 6. Asegurar que haya un savefig al final si el LLM lo olvidó
+                        if "savefig" not in code_cleaned:
+                            logger.log_warning("⚠️ El código no incluía savefig(), añadiéndolo automáticamente...")
+                            code_cleaned += "\nplt.savefig(SAVE_PATH, bbox_inches='tight')"
+                        
+                        # 7. Reemplazar plt.show() por un comentario para evitar bloqueos
+                        code_cleaned = code_cleaned.replace("plt.show()", "# plt.show()")
                         
                         # Ejecutar código generado (limpiado o corregido)
                         try:
@@ -694,6 +693,8 @@ Analiza el texto y genera hasta 2 gráficos de alto valor si los datos lo permit
                     logger.log_success(f"✅ Gráfico generado y subido a R2: {bookmark}")
                 else:
                     logger.log_error(f"❌ El código ejecutado no generó el archivo esperado.")
+                    logger.log_info("📋 Código que falló en generar el archivo:")
+                    logger.log_info(f"\n{code_cleaned}")
 
             except Exception as e:
                 import traceback
