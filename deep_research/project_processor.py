@@ -190,8 +190,7 @@ DESCRIPTION: {project_description}
 
 3. **PROFESSIONAL TONE**:
    - Use formal, strategic consulting language
-   - NO emojis, NO ###, NO casual symbols
-   - Use bullet points sparingly, prefer flowing prose
+   - NO casual symbols or emojis
    - Include specific data, numbers, and concrete recommendations
 
 4. **DOCUMENT STRUCTURE** (STRICT ORDER):
@@ -209,7 +208,7 @@ DESCRIPTION: {project_description}
     - 3-5 prioritized actionable recommendations with timeframes]
    
    ## [First Section Title]
-   [Full chapter content with its subsections 1.1, 1.2, etc.]
+   [Full chapter content with its original formatting and subsections]
    
    ## [Next Section Title]
    [Continue with all remaining chapters, following their original numbering...]
@@ -217,26 +216,25 @@ DESCRIPTION: {project_description}
    ## Conclusions and Recommendations
    [Final synthesis with prioritized action items]
 
-5. **HEADING HIERARCHY**:
+5. **HEADING HIERARCHY AND FIDELITY**:
    - H1 (#): Document title only
-   - H2 (##): Major sections (1., 2., 3., etc.)
-   - H3 (###): Subsections (1.1, 1.2, 2.1, etc.)
-   - H4 (####): Sub-subsections (1.1.1, 1.1.2, etc.)
-   - PRESERVE the original numbering from chapter topics
+   - H2 (##): Major sections (Chapters)
+   - H3 (###) and H4 (####): Subsections within chapters
+   - **RESPECT ALL HEADERS**: If an original item uses #, ##, or ### icons/markers, you MUST preserve them exactly as they are in the source text.
+   - **DO NOT STRIP HEADERS**: Never remove or downgrade headers provided in the original chapters.
 
-6. **CONTENT PRESERVATION** (CRITICAL — THIS IS THE MOST IMPORTANT REQUIREMENT):
-   - PRESERVE the FULL content of every chapter — do NOT summarize, compress, or omit details
-   - Include ALL data points, statistics, examples, and analysis from each chapter
-   - Add smooth transition paragraphs BETWEEN sections to create narrative flow
-   - Standardize terminology throughout the document
-   - Cross-reference between sections when relevant (e.g., "As discussed in Section 2.1...")
-   - ONLY remove content that is EXACTLY duplicated word-for-word across chapters
-   - When similar topics appear in different chapters, KEEP BOTH — they provide different perspectives
-   - The final document MUST be approximately the same length as the sum of all input chapters
+6. **CONTENT PRESERVATION (ABSOLUTE FIDELITY)**:
+   - **THIS IS THE MOST IMPORTANT REQUIREMENT**: You are a CONSOLIDATOR, not an editor.
+   - **DO NOT REWRITE**: Preserve the original wording, phrasing, and sentence structure of every chapter.
+   - **DO NOT SUMMARIZE**: Do not compress or omit any details, data points, statistics, or examples.
+   - **NO INVENTIONS**: Do not add "transition paragraphs" or any external information that is not in the original chapters or project context. 
+   - **Maintain Format**: If the original text uses bullet points, tables, or bold text, PRESERVE IT EXACTLY.
+   - ONLY remove content that is EXACTLY duplicated word-for-word across chapters.
+   - When similar topics appear in different chapters, KEEP BOTH — they provide different perspectives.
+   - The final document MUST be a seamless union of all input chapters, maintaining 100% of their individual length and depth.
 
 7. **CHARTS AND VISUALIZATIONS**:
-   - PRESERVE all [[PLOT:ID|Title]] markers exactly as they appear
-   - Do not modify or remove these markers
+   - PRESERVE all [[PLOT:ID|Title]] markers exactly as they appear. Do not modify or remove them.
 
 8. **CITATIONS AND REFERENCES**:
    - PRESERVE all existing [X] citation numbers exactly as they are.
@@ -244,13 +242,12 @@ DESCRIPTION: {project_description}
    - Do NOT renumber, Do NOT generate a References section (this is handled programmatically).
    - Ensure citations remain attached to their relevant data/claims after consolidation.
 
-9. **QUALITY CHECKLIST** (ensure all are met):
+9. **QUALITY CHECKLIST**:
    ✓ Executive Summary covers ALL main sections
-   ✓ No orphan sections without context
-   ✓ Data and statistics are properly attributed
+   ✓ No headers removed or modified from original content
+   ✓ Wording and data preserved 100% from sources
    ✓ Recommendations are specific and actionable
-   ✓ Document flows logically from analysis to conclusions
-   ✓ No placeholder text or TODO items
+   ✓ No placeholder text, no inventions, no TODO items
    ✓ Professional formatting throughout
 """
 

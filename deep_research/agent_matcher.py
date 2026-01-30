@@ -183,11 +183,22 @@ def _apply_agent_match(item_id, agent, reason):
             logger.log_error(f"Error applying match: {e}")
 
 def _llm_match_agent(item_id, topic, agents_info):
-    """Uses LLM to select the best agent."""
+    """Uses LLM to select the best agent with robust parsing."""
     agents_desc = "\n".join([f"{i+1}. **{a['name']}**: {a['description']}" for i, a in enumerate(agents_info)])
     
-    system_msg = "Eres un experto en investigación. Selecciona el mejor agente para el tema. Formato: NUMERO: X, RAZON: [explicación]"
-    user_msg = f"Tema: {topic}\n\nAgentes:\n{agents_desc}"
+    system_msg = """Eres un experto en investigación estratégica. Tu tarea es asignar el mejor agente especializado a un tema.
+    
+RESPUESTA REQUERIDA (Formato JSON):
+{
+  "numero": X,
+  "razon": "Explicación breve de por qué este agente es el mejor para el tema"
+}
+
+Si no puedes responder en JSON, usa este formato estricto:
+NUMERO: X
+RAZON: [explicación]"""
+
+    user_msg = f"Tema: {topic}\n\nAgentes Disponibles:\n{agents_desc}"
 
     try:
         items_table.update(item_id, {"Status": "Matching"})
@@ -197,6 +208,25 @@ def _llm_match_agent(item_id, topic, agents_info):
         ])
         
         content = response.content.strip()
+        
+        # 1. Intentar parsear como JSON (Mejor opción)
+        import json
+        from .utils import clean_and_parse_json
+        try:
+            data = clean_and_parse_json(content)
+            if isinstance(data, dict):
+                # Buscar claves en español e inglés
+                idx_val = data.get("numero", data.get("number"))
+                reason = data.get("razon", data.get("reason", "Selected by LLM (JSON)"))
+                if idx_val is not None:
+                    idx = int(idx_val) - 1
+                    if 0 <= idx < len(agents_info):
+                        _apply_agent_match(item_id, agents_info[idx], reason)
+                        return
+        except:
+            pass
+
+        # 2. Regex original (NUMERO: X)
         num_match = re.search(r'NUMERO:\s*(\d+)', content, re.I)
         reason_match = re.search(r'RAZON:\s*(.+)', content, re.I | re.S)
         
@@ -204,10 +234,31 @@ def _llm_match_agent(item_id, topic, agents_info):
             idx = int(num_match.group(1)) - 1
             if 0 <= idx < len(agents_info):
                 agent = agents_info[idx]
-                reason = reason_match.group(1).strip() if reason_match else "Selected by LLM"
+                reason = reason_match.group(1).strip() if reason_match else "Selected by LLM (Standard)"
                 _apply_agent_match(item_id, agent, reason)
                 return
+
+        # 3. Fallback: El LLM responde con "X: Name" o "X - Name"
+        # Común en modelos charlatanes: "4: General_Researcher..."
+        start_num_match = re.search(r'^\s*(\d+)\s*[:\-]', content)
+        if start_num_match:
+            idx = int(start_num_match.group(1)) - 1
+            if 0 <= idx < len(agents_info):
+                agent = agents_info[idx]
+                _apply_agent_match(item_id, agent, f"LLM Match (Fallback start num): {content[:100]}...")
+                return
+
+        # 4. Fallback Extremo: El primer número que aparezca en el texto
+        all_nums = re.findall(r'\b(\d+)\b', content)
+        if all_nums:
+            for n_str in all_nums:
+                idx = int(n_str) - 1
+                if 0 <= idx < len(agents_info):
+                    # Solo aceptamos el primer número que sea un índice válido
+                    agent = agents_info[idx]
+                    _apply_agent_match(item_id, agent, f"LLM Match (Extreme fallback): {content[:100]}...")
+                    return
         
-        logger.log_warning(f"LLM returned invalid response: {content}")
+        logger.log_warning(f"LLM returned invalid response structure: {content[:200]}...")
     except Exception as e:
         logger.log_error(f"Error in LLM matching: {e}")

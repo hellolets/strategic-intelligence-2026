@@ -449,9 +449,55 @@ Analiza el texto y genera hasta 2 gráficos de alto valor si los datos lo permit
                         if "savefig" not in code_cleaned:
                             logger.log_warning("⚠️ El código no incluía savefig(), añadiéndolo automáticamente...")
                             code_cleaned += "\nplt.savefig(SAVE_PATH, bbox_inches='tight')"
-                        
+                        else:
+                            # 6b. FORZAR el uso de SAVE_PATH en todos los savefig() detectados
+                            # Esto evita que el LLM guarde archivos con nombres arbitrarios (hardcoded)
+                            # que luego no se limpian porque el sistema no conoce sus nombres.
+                            # Patrón más robusto: busca savefig(...) con o sin prefijo
+                            savefig_pattern = r'\bsavefig\s*\(\s*([^)]*)\s*\)'
+                            
+                            def replace_with_save_path(match):
+                                # Extraer los parámetros actuales
+                                params_str = match.group(1).strip()
+                                
+                                # Si no hay parámetros, simplemente ponemos SAVE_PATH
+                                if not params_str:
+                                    return f"savefig(SAVE_PATH, bbox_inches='tight')"
+                                
+                                # Intentar separar el primer argumento (que suele ser el path) del resto
+                                # Dividimos solo por la primera coma para separar el path de los kwargs
+                                parts = params_str.split(',', 1)
+                                first_arg = parts[0].strip()
+                                remaining = parts[1].strip() if len(parts) > 1 else ""
+                                
+                                # Determinar si el primer argumento es un path hardcodeado o ya es SAVE_PATH
+                                # Si contiene comillas o termina con extensiones comunes, es un path a reemplazar
+                                is_path = any(x in first_arg for x in ["'", '"', '.png', '.jpg', '.pdf', '.svg']) or first_arg == "SAVE_PATH"
+                                
+                                if is_path:
+                                    # Caso: savefig('file.png', ...) o savefig(SAVE_PATH, ...)
+                                    if remaining:
+                                        if 'bbox_inches' in remaining:
+                                            return f"savefig(SAVE_PATH, {remaining})"
+                                        return f"savefig(SAVE_PATH, {remaining}, bbox_inches='tight')"
+                                    return f"savefig(SAVE_PATH, bbox_inches='tight')"
+                                else:
+                                    # Caso: El LLM empezó directamente con kwargs? savefig(bbox_inches='tight')
+                                    # (Poco probable pero posible). En este caso el argument original se mantiene
+                                    if 'bbox_inches' in params_str:
+                                        return f"savefig(SAVE_PATH, {params_str})"
+                                    return f"savefig(SAVE_PATH, {params_str}, bbox_inches='tight')"
+                            
+                            if re.search(savefig_pattern, code_cleaned):
+                                logger.log_info("🔧 Forzando el uso de SAVE_PATH en las llamadas a savefig()...")
+                                code_cleaned = re.sub(savefig_pattern, replace_with_save_path, code_cleaned)
+
                         # 7. Reemplazar plt.show() por un comentario para evitar bloqueos
-                        code_cleaned = code_cleaned.replace("plt.show()", "# plt.show()")
+                        # Regex para capturar plt.show() o simplemente show() con espacios.
+                        code_cleaned = re.sub(r'\bshow\s*\(\s*([^)]*)\s*\)', r'# show(\1)', code_cleaned)
+                        
+                        # 8. Limpieza proactiva: capturar estado inicial del directorio
+                        files_before = set(os.listdir('.'))
                         
                         # Ejecutar código generado (limpiado o corregido)
                         try:
@@ -460,7 +506,17 @@ Analiza el texto y genera hasta 2 gráficos de alto valor si los datos lo permit
                             # Si aún hay error de sintaxis después de la corrección, lanzarlo
                             logger.log_error(f"❌ Error de sintaxis persistente después de corrección automática: {exec_syntax_err}")
                             raise exec_syntax_err
-                        # No cerramos aquí para verificar existencia primero
+                        finally:
+                            # 9. Limpieza de archivos "fugitivos" (creados por el LLM fuera de temp_plots)
+                            files_after = set(os.listdir('.'))
+                            stray_files = files_after - files_before
+                            for stray in stray_files:
+                                if stray.lower().endswith(('.png', '.jpg', '.jpeg', '.pdf', '.svg', '.csv', '.xlsx')):
+                                    try:
+                                        os.remove(stray)
+                                        logger.log_warning(f"🗑️ Limpieza reactiva: Eliminado archivo fugitivo '{stray}' generado por el LLM.")
+                                    except Exception as e:
+                                        logger.log_error(f"⚠️ No se pudo eliminar el archivo fugitivo '{stray}': {e}")
                     except (SyntaxError, IndentationError) as syntax_err:
                         # Error de sintaxis ya manejado arriba, re-lanzar
                         raise syntax_err
@@ -691,6 +747,13 @@ Analiza el texto y genera hasta 2 gráficos de alto valor si los datos lo permit
                         "context": plot.get("insertion_context", "")
                     })
                     logger.log_success(f"✅ Gráfico generado y subido a R2: {bookmark}")
+                    
+                    # Limpieza inmediata: ELIMINAR LOCALMENTE una vez subido a R2
+                    try:
+                        os.remove(local_filename)
+                        logger.log_info(f"🗑️ Archivo local eliminado tras subida a R2: {local_filename}")
+                    except Exception as e:
+                        logger.log_warning(f"⚠️ No se pudo eliminar el archivo local {local_filename}: {e}")
                 else:
                     logger.log_error(f"❌ El código ejecutado no generó el archivo esperado.")
                     logger.log_info("📋 Código que falló en generar el archivo:")

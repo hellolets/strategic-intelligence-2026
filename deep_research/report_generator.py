@@ -475,6 +475,17 @@ def generate_docx_from_markdown(markdown_text: str, output_path: str, plot_data:
                         # Usar try-except específico para errores de imagen
                         try:
                             run_img.add_picture(img_path, width=Inches(5.0))
+                            
+                            # Limpieza inmediata: ELIMINAR LOCALMENTE tras inserción en Word
+                            try:
+                                # Solo borrar si es un archivo que descargamos a temp_plots 
+                                # (para evitar borrar por error archivos de sistema si el path fuera otro)
+                                if "temp_plots" in img_path:
+                                    os.remove(img_path)
+                                    logger.log_info(f"🗑️ Imagen temporal eliminada tras inserción: {os.path.basename(img_path)}")
+                            except Exception as cleanup_err:
+                                logger.log_warning(f"⚠️ No se pudo eliminar la imagen temporal {img_path}: {cleanup_err}")
+                                
                         except Exception as img_err:
                             logger.log_error(f"❌ Error insertando imagen {plot_id} desde {img_path}: {img_err}")
                             logger.log_error(f"   Tipo de error: {type(img_err).__name__}")
@@ -695,6 +706,16 @@ def generate_docx_from_markdown(markdown_text: str, output_path: str, plot_data:
         # Guardar
         doc.save(output_path)
         logger.log_success(f"Archivo Word generado en: {output_path}")
+        
+        # Limpieza final del directorio temporal si quedó vacío
+        try:
+            temp_dir = "temp_plots"
+            if os.path.exists(temp_dir) and not os.listdir(temp_dir):
+                os.rmdir(temp_dir)
+                logger.log_info(f"🗑️ Directorio temporal '{temp_dir}' eliminado (estaba vacío).")
+        except Exception as e:
+            logger.log_warning(f"⚠️ No se pudo limpiar el directorio temporal '{temp_dir}': {e}")
+
         return True
 
     except Exception as e:

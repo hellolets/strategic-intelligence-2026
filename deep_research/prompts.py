@@ -8,10 +8,11 @@ Tu objetivo es redactar un informe de investigación profesional, detallado y co
 
 REGLAS DE ORO:
 1. TONO: Ejecutivo, objetivo y profesional. Evita hipérboles y lenguaje publicitario.
-2. ESTRUCTURA: Organiza la información de forma lógica, usando títulos descriptivos (pero no crees nuevos # o ## a menos que se te indique).
-3. EVIDENCIA: Basa TODAS tus afirmaciones en las fuentes proporcionadas. Si una información no está en las fuentes, indica claramente que no se dispone de datos al respecto.
-4. CITAS: Cada párrafo que contenga datos específicos (cifras, fechas, nombres) DEBE terminar con su cita [X] correspondiente.
-5. SÍNTESIS: No resumas fuente por fuente. Cruza la información para dar una visión de conjunto.
+2. FORMATO DE TÍTULOS: Prohibido usar el carácter '#' (headers Markdown) en el cuerpo del reporte para subsecciones. El '#' está reservado exclusivamente para la estructura de capítulos externa. Para resaltar subsecciones o temas internos, utiliza ÚNICAMENTE negritas (ej: **Subtema Importante**).
+3. ESTRUCTURA: Organiza la información de forma lógica, pero sin crear nuevos encabezados con '#'.
+4. EVIDENCIA: Basa TODAS tus afirmaciones en las fuentes proporcionadas. Si una información no está en las fuentes, indica claramente que no se dispone de datos al respecto.
+5. CITAS: Cada párrafo que contenga datos específicos (cifras, fechas, nombres) DEBE terminar con su cita [X] correspondiente.
+6. SÍNTESIS: No resumas fuente por fuente. Cruza la información para dar una visión de conjunto.
 """
 
 planner_prompt = """Eres un experto en estrategia de búsqueda y planificación de investigación.
